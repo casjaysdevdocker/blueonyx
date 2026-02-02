@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+##@Version           :  202602021746-git
+# @@Author           :  CasjaysDev
+# @@Contact          :  CasjaysDev <docker-admin@casjaysdev.pro>
+# @@License          :  MIT
+# @@Copyright        :  Copyright 2026 CasjaysDev
+# @@File             :  blueonyx-env-config
+# @@Description      :  BlueOnyx environment variable configuration handler
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Apply all environment variable configurations to BlueOnyx at runtime
+set -e
+
+# Wait for CCEd to be ready (check for cced.init service, not cceclient)
+wait_for_cced() {
+  local timeout=120
+  local count=0
+  
+  # Wait for cced.init service to be active
+  while [ $count -lt $timeout ]; do
+    if systemctl is-active --quiet cced.init 2>/dev/null; then
+      # Give it a few extra seconds to fully initialize
+      sleep 3
+      return 0
+    fi
+    sleep 1
+    count=$((count + 1))
+  done
+  
+  echo "WARNING: CCEd not ready after ${timeout}s, continuing anyway..." >&2
+  return 1
+}
+
+# Get Docker gateway IP for default relay
+get_docker_gateway() {
+  ip route | grep default | awk '{print $3}' | head -1
+}
+
+echo "Configuring BlueOnyx from environment variables..."
+
+# Network Configuration
+BLUEONYX_HOSTNAME="${BLUEONYX_HOSTNAME:-blueonyx}"
+BLUEONYX_DOMAIN="${BLUEONYX_DOMAIN:-local}"
+BLUEONYX_IPV4="${BLUEONYX_IPV4:-$(hostname -I 2>/dev/null | awk '{print $1}')}"
+BLUEONYX_IPV6="${BLUEONYX_IPV6:-}"
+BLUEONYX_GATEWAY="${BLUEONYX_GATEWAY:-$(get_docker_gateway)}"
+BLUEONYX_NAMESERVER="${BLUEONYX_NAMESERVER:-8.8.8.8}"
+
+# Admin Configuration
+BLUEONYX_ADMIN_USER="${BLUEONYX_ADMIN_USER:-admin}"
+BLUEONYX_ADMIN_PASS="${BLUEONYX_ADMIN_PASS:-}"
+BLUEONYX_ADMIN_EMAIL="${BLUEONYX_ADMIN_EMAIL:-admin@${BLUEONYX_DOMAIN}}"
+
+# Mail Configuration
+BLUEONYX_MTA="${BLUEONYX_MTA:-postfix}"
+BLUEONYX_POSTFIX_MODE="${BLUEONYX_POSTFIX_MODE:-satellite}"
+BLUEONYX_POSTFIX_RELAY="${BLUEONYX_POSTFIX_RELAY:-$(get_docker_gateway)}"
+BLUEONYX_POSTFIX_RELAY_PORT="${BLUEONYX_POSTFIX_RELAY_PORT:-25}"
+BLUEONYX_POSTFIX_RELAY_USER="${BLUEONYX_POSTFIX_RELAY_USER:-}"
+BLUEONYX_POSTFIX_RELAY_PASS="${BLUEONYX_POSTFIX_RELAY_PASS:-}"
+BLUEONYX_MAIL_RELAY="${BLUEONYX_MAIL_RELAY:-${BLUEONYX_POSTFIX_RELAY}}"
+BLUEONYX_MAIL_RELAY_PORT="${BLUEONYX_MAIL_RELAY_PORT:-${BLUEONYX_POSTFIX_RELAY_PORT}}"
+BLUEONYX_ENABLE_SPAM_FILTER="${BLUEONYX_ENABLE_SPAM_FILTER:-yes}"
+BLUEONYX_ENABLE_ANTIVIRUS="${BLUEONYX_ENABLE_ANTIVIRUS:-yes}"
+BLUEONYX_ENABLE_DKIM="${BLUEONYX_ENABLE_DKIM:-yes}"
+BLUEONYX_ENABLE_DOVECOT="${BLUEONYX_ENABLE_DOVECOT:-yes}"
+
+# Database Configuration
+BLUEONYX_DB_TYPE="${BLUEONYX_DB_TYPE:-mariadb}"
+BLUEONYX_DB_ROOT_PASS="${BLUEONYX_DB_ROOT_PASS:-}"
+BLUEONYX_ENABLE_POSTGRES="${BLUEONYX_ENABLE_POSTGRES:-no}"
+
+# Valkey/Redis Configuration
+BLUEONYX_ENABLE_VALKEY="${BLUEONYX_ENABLE_VALKEY:-yes}"
+BLUEONYX_VALKEY_PORT="${BLUEONYX_VALKEY_PORT:-6379}"
+BLUEONYX_VALKEY_MAXMEM="${BLUEONYX_VALKEY_MAXMEM:-256mb}"
+
+# Web Server Configuration
+BLUEONYX_WEB_PROXY="${BLUEONYX_WEB_PROXY:-nginx}"
+BLUEONYX_HTTP2_ENABLED="${BLUEONYX_HTTP2_ENABLED:-yes}"
+BLUEONYX_TLS_VERSION="${BLUEONYX_TLS_VERSION:-1.3}"
+BLUEONYX_ENABLE_SSL="${BLUEONYX_ENABLE_SSL:-yes}"
+BLUEONYX_SSL_TYPE="${BLUEONYX_SSL_TYPE:-selfsigned}"
+
+# Certbot/Let's Encrypt Configuration
+BLUEONYX_CERTBOT_ENABLED="${BLUEONYX_CERTBOT_ENABLED:-no}"
+BLUEONYX_CERTBOT_EMAIL="${BLUEONYX_CERTBOT_EMAIL:-${BLUEONYX_ADMIN_EMAIL}}"
+BLUEONYX_CERTBOT_DOMAINS="${BLUEONYX_CERTBOT_DOMAINS:-}"
+BLUEONYX_CERTBOT_WEBROOT="${BLUEONYX_CERTBOT_WEBROOT:-/var/www/html}"
+
+# DNS Configuration
+BLUEONYX_ENABLE_DNS="${BLUEONYX_ENABLE_DNS:-yes}"
+BLUEONYX_DNS_FORWARDERS="${BLUEONYX_DNS_FORWARDERS:-8.8.8.8 8.8.4.4}"
+
+# FTP Configuration
+BLUEONYX_ENABLE_FTP="${BLUEONYX_ENABLE_FTP:-yes}"
+BLUEONYX_FTP_PASSIVE_PORTS="${BLUEONYX_FTP_PASSIVE_PORTS:-30000-30100}"
+
+# Virtual Hosts (comma-separated list: domain1.com,domain2.com)
+BLUEONYX_VHOSTS="${BLUEONYX_VHOSTS:-}"
+
+# Feature Toggles
+BLUEONYX_ENABLE_CALDAV="${BLUEONYX_ENABLE_CALDAV:-yes}"
+BLUEONYX_ENABLE_DOCKER="${BLUEONYX_ENABLE_DOCKER:-yes}"
+BLUEONYX_ENABLE_WEBALIZER="${BLUEONYX_ENABLE_WEBALIZER:-yes}"
+
+# Wait for CCEd
+if wait_for_cced; then
+  echo "CCEd is ready, applying configuration..."
+  
+  # Note: CCEd client commands may not work in initial boot, so we configure files directly
+  # This ensures configuration happens even if cceclient is unavailable
+  
+  # Generate passwords if not provided
+  if [ -z "$BLUEONYX_ADMIN_PASS" ]; then
+    BLUEONYX_ADMIN_PASS="$(openssl rand -base64 16)"
+    echo "Generated admin password: $BLUEONYX_ADMIN_PASS" > /data/ADMIN_PASSWORD.txt
+    chmod 600 /data/ADMIN_PASSWORD.txt
+    echo "Admin password saved to: /data/ADMIN_PASSWORD.txt"
+  fi
+  
+  if [ -z "$BLUEONYX_DB_ROOT_PASS" ]; then
+    BLUEONYX_DB_ROOT_PASS="$(openssl rand -base64 16)"
+    echo "Generated MySQL root password: $BLUEONYX_DB_ROOT_PASS" > /data/MYSQL_ROOT_PASSWORD.txt
+    chmod 600 /data/MYSQL_ROOT_PASSWORD.txt
+    echo "MySQL root password saved to: /data/MYSQL_ROOT_PASSWORD.txt"
+  fi
+  
+  # Configure MySQL root password if MySQL is running
+  if systemctl is-active mysqld >/dev/null 2>&1 || systemctl is-active mariadb >/dev/null 2>&1; then
+    mysql -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${BLUEONYX_DB_ROOT_PASS}';" 2>/dev/null || true
+  fi
+  
+  # Configure admin user
+  if id "$BLUEONYX_ADMIN_USER" >/dev/null 2>&1; then
+    echo "$BLUEONYX_ADMIN_USER:$BLUEONYX_ADMIN_PASS" | chpasswd 2>/dev/null || true
+  fi
+  
+  # Configure Postfix (satellite mode by default)
+  if [ -f /etc/postfix/main.cf ]; then
+    echo "Configuring Postfix in ${BLUEONYX_POSTFIX_MODE} mode..."
+    
+    if [ "$BLUEONYX_POSTFIX_MODE" = "satellite" ]; then
+      postconf -e "relayhost = [${BLUEONYX_POSTFIX_RELAY}]:${BLUEONYX_POSTFIX_RELAY_PORT}"
+      postconf -e "inet_interfaces = loopback-only"
+      postconf -e "mydestination = localhost"
+      
+      # Configure SASL auth if credentials provided
+      if [ -n "$BLUEONYX_POSTFIX_RELAY_USER" ] && [ -n "$BLUEONYX_POSTFIX_RELAY_PASS" ]; then
+        echo "[${BLUEONYX_POSTFIX_RELAY}]:${BLUEONYX_POSTFIX_RELAY_PORT} ${BLUEONYX_POSTFIX_RELAY_USER}:${BLUEONYX_POSTFIX_RELAY_PASS}" > /etc/postfix/sasl_passwd
+        postmap /etc/postfix/sasl_passwd
+        chmod 600 /etc/postfix/sasl_passwd /etc/postfix/sasl_passwd.db
+        postconf -e "smtp_sasl_auth_enable = yes"
+        postconf -e "smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd"
+        postconf -e "smtp_sasl_security_options = noanonymous"
+        postconf -e "smtp_tls_security_level = may"
+      fi
+    fi
+    
+    systemctl reload postfix 2>/dev/null || true
+  fi
+  
+  # Configure Dovecot SSL certificates
+  if [ "$BLUEONYX_ENABLE_DOVECOT" = "yes" ] && [ ! -f /config/ssl/certs/dovecot.pem ]; then
+    echo "Generating self-signed SSL certificates for Dovecot..."
+    mkdir -p /config/ssl/certs /config/ssl/private
+    
+    openssl req -new -x509 -days 3650 -nodes \
+      -out /config/ssl/certs/dovecot.pem \
+      -keyout /config/ssl/private/dovecot.key \
+      -subj "/C=US/ST=State/L=City/O=BlueOnyx/OU=Mail/CN=${BLUEONYX_HOSTNAME}.${BLUEONYX_DOMAIN}" 2>/dev/null || true
+    
+    chmod 644 /config/ssl/certs/dovecot.pem
+    chmod 600 /config/ssl/private/dovecot.key
+    
+    # Update Dovecot to use /config/ssl certificates
+    if [ -f /etc/dovecot/conf.d/10-ssl.conf ]; then
+      sed -i "s|ssl_cert = .*|ssl_cert = </config/ssl/certs/dovecot.pem|" /etc/dovecot/conf.d/10-ssl.conf
+      sed -i "s|ssl_key = .*|ssl_key = </config/ssl/private/dovecot.key|" /etc/dovecot/conf.d/10-ssl.conf
+      sed -i "s|ssl_ca = .*|#ssl_ca = |" /etc/dovecot/conf.d/10-ssl.conf
+    fi
+    
+    systemctl enable dovecot 2>/dev/null || true
+    systemctl restart dovecot 2>/dev/null || true
+  fi
+  
+  # Configure Valkey/Redis
+  if [ "$BLUEONYX_ENABLE_VALKEY" = "yes" ]; then
+    if [ -f /etc/valkey/valkey.conf ]; then
+      echo "Configuring Valkey..."
+      sed -i "s/^port .*/port ${BLUEONYX_VALKEY_PORT}/" /etc/valkey/valkey.conf
+      sed -i "s/^# maxmemory .*/maxmemory ${BLUEONYX_VALKEY_MAXMEM}/" /etc/valkey/valkey.conf
+      sed -i "s/^# maxmemory-policy .*/maxmemory-policy allkeys-lru/" /etc/valkey/valkey.conf
+      systemctl enable valkey 2>/dev/null || true
+      systemctl restart valkey 2>/dev/null || true
+    fi
+  else
+    systemctl disable valkey 2>/dev/null || true
+    systemctl stop valkey 2>/dev/null || true
+  fi
+  
+  # Configure Certbot for Let's Encrypt
+  if [ "$BLUEONYX_CERTBOT_ENABLED" = "yes" ] && [ -n "$BLUEONYX_CERTBOT_DOMAINS" ]; then
+    echo "Setting up Certbot for Let's Encrypt..."
+    
+    # Split comma-separated domains
+    IFS=',' read -ra DOMAINS <<< "$BLUEONYX_CERTBOT_DOMAINS"
+    DOMAIN_ARGS=""
+    for domain in "${DOMAINS[@]}"; do
+      domain=$(echo "$domain" | xargs) # trim whitespace
+      DOMAIN_ARGS="$DOMAIN_ARGS -d $domain"
+    done
+    
+    # Request certificates (webroot mode) - store in /config/ssl
+    certbot certonly --webroot -w "$BLUEONYX_CERTBOT_WEBROOT" \
+      $DOMAIN_ARGS \
+      --email "$BLUEONYX_CERTBOT_EMAIL" \
+      --agree-tos --non-interactive \
+      --keep-until-expiring \
+      --config-dir /config/ssl/letsencrypt \
+      --work-dir /var/lib/letsencrypt \
+      --logs-dir /logs/letsencrypt 2>/dev/null || {
+      echo "WARNING: Certbot certificate request failed, continuing with self-signed"
+    }
+    
+    # Set up auto-renewal cron
+    echo "0 0,12 * * * root python3 -c 'import random; import time; time.sleep(random.random() * 3600)' && certbot renew -q --config-dir /config/ssl/letsencrypt --work-dir /var/lib/letsencrypt --logs-dir /logs/letsencrypt" > /etc/cron.d/certbot-renew
+  fi
+  
+  # Process Virtual Hosts
+  if [ -n "$BLUEONYX_VHOSTS" ]; then
+    echo "Configuring virtual hosts..."
+    IFS=',' read -ra VHOSTS <<< "$BLUEONYX_VHOSTS"
+    for vhost in "${VHOSTS[@]}"; do
+      vhost=$(echo "$vhost" | xargs) # trim whitespace
+      if [ -n "$vhost" ]; then
+        echo "  - Creating vhost: $vhost"
+        
+        # Create document root
+        mkdir -p "/var/www/vhosts/$vhost/httpdocs"
+        mkdir -p "/var/www/vhosts/$vhost/logs"
+        
+        # Create basic index.html
+        if [ ! -f "/var/www/vhosts/$vhost/httpdocs/index.html" ]; then
+          cat > "/var/www/vhosts/$vhost/httpdocs/index.html" << VHOSTHTML
+<!DOCTYPE html>
+<html>
+<head><title>$vhost</title></head>
+<body>
+<h1>Welcome to $vhost</h1>
+<p>This site is hosted on BlueOnyx.</p>
+</body>
+</html>
+VHOSTHTML
+        fi
+        
+        # Set permissions
+        chown -R apache:apache "/var/www/vhosts/$vhost" 2>/dev/null || true
+        
+        # Create Apache vhost config
+        cat > "/etc/httpd/conf.d/vhost_${vhost}.conf" << VHOSTCONF
+<VirtualHost *:80>
+    ServerName ${vhost}
+    DocumentRoot /var/www/vhosts/${vhost}/httpdocs
+    
+    <Directory /var/www/vhosts/${vhost}/httpdocs>
+        AllowOverride All
+        Require all granted
+    </Directory>
+    
+    ErrorLog /var/www/vhosts/${vhost}/logs/error_log
+    CustomLog /var/www/vhosts/${vhost}/logs/access_log combined
+</VirtualHost>
+VHOSTCONF
+      fi
+    done
+    
+    # Reload Apache
+    systemctl reload httpd 2>/dev/null || true
+  fi
+  
+  # Enable/disable remaining services
+  [ "$BLUEONYX_ENABLE_DNS" = "yes" ] && systemctl enable named 2>/dev/null || systemctl disable named 2>/dev/null
+  [ "$BLUEONYX_ENABLE_FTP" = "yes" ] && systemctl enable proftpd 2>/dev/null || systemctl disable proftpd 2>/dev/null
+  [ "$BLUEONYX_ENABLE_SPAM_FILTER" = "yes" ] && systemctl enable spamassassin 2>/dev/null || true
+  [ "$BLUEONYX_ENABLE_ANTIVIRUS" = "yes" ] && systemctl enable clamd@scan 2>/dev/null || true
+  
+  # Configure FTP passive ports
+  if [ -f /etc/proftpd.conf ] && [ "$BLUEONYX_ENABLE_FTP" = "yes" ]; then
+    if ! grep -q "PassivePorts" /etc/proftpd.conf; then
+      echo "PassivePorts $BLUEONYX_FTP_PASSIVE_PORTS" >> /etc/proftpd.conf
+      systemctl reload proftpd 2>/dev/null || true
+    fi
+  fi
+  
+  # Configure DNS forwarders
+  if [ -f /etc/named.conf ] && [ "$BLUEONYX_ENABLE_DNS" = "yes" ]; then
+    if ! grep -q "forwarders" /etc/named.conf; then
+      sed -i "/options {/a \        forwarders { $(echo $BLUEONYX_DNS_FORWARDERS | sed 's/ /; /g'); };" /etc/named.conf
+      systemctl reload named 2>/dev/null || true
+    fi
+  fi
+  
+  echo ""
+  echo "============================================"
+  echo "BlueOnyx Configuration Complete!"
+  echo "============================================"
+  echo ""
+  echo "System Configuration:"
+  echo "  Hostname: $BLUEONYX_HOSTNAME.$BLUEONYX_DOMAIN"
+  echo "  Admin User: $BLUEONYX_ADMIN_USER"
+  echo "  Admin Email: $BLUEONYX_ADMIN_EMAIL"
+  echo "  IPv4: $BLUEONYX_IPV4"
+  echo ""
+  echo "Services:"
+  echo "  Postfix Mode: $BLUEONYX_POSTFIX_MODE"
+  echo "  Postfix Relay: $BLUEONYX_POSTFIX_RELAY:$BLUEONYX_POSTFIX_RELAY_PORT"
+  echo "  DNS: $([ "$BLUEONYX_ENABLE_DNS" = "yes" ] && echo "Enabled" || echo "Disabled")"
+  echo "  FTP: $([ "$BLUEONYX_ENABLE_FTP" = "yes" ] && echo "Enabled" || echo "Disabled")"
+  echo "  Valkey: $([ "$BLUEONYX_ENABLE_VALKEY" = "yes" ] && echo "Enabled (port $BLUEONYX_VALKEY_PORT)" || echo "Disabled")"
+  echo "  Dovecot: $([ "$BLUEONYX_ENABLE_DOVECOT" = "yes" ] && echo "Enabled" || echo "Disabled")"
+  echo "  Certbot: $([ "$BLUEONYX_CERTBOT_ENABLED" = "yes" ] && echo "Enabled" || echo "Disabled")"
+  echo ""
+  if [ -n "$BLUEONYX_VHOSTS" ]; then
+    echo "Virtual Hosts: $BLUEONYX_VHOSTS"
+    echo ""
+  fi
+  echo "============================================"
+  echo ""
+else
+  echo "WARNING: CCEd not ready, skipping configuration"
+fi
+
+exit 0

@@ -14,8 +14,8 @@ ARG PATH="/usr/local/etc/docker/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/us
 ARG USER="root"
 ARG SHELL_OPTS="set -e -o pipefail"
 
-ARG SERVICE_PORT=""
-ARG EXPOSE_PORTS=""
+ARG SERVICE_PORT="444"
+ARG EXPOSE_PORTS="81 444 80 443 20 21 22 25 587 465 110 995 143 993 53"
 ARG PHP_VERSION="system"
 ARG NODE_VERSION="system"
 ARG NODE_MANAGER="system"
@@ -24,12 +24,11 @@ ARG IMAGE_REPO="casjaysdevdocker/blueonyx"
 ARG IMAGE_VERSION="latest"
 ARG CONTAINER_VERSION=""
 
-ARG PULL_URL="almalinux/8-init"
-ARG DISTRO_VERSION="${IMAGE_VERSION}"
+ARG PULL_URL="almalinux/10-init"
+ARG DISTRO_VERSION="latest"
 ARG BUILD_VERSION="${BUILD_DATE}"
 
-FROM tianon/gosu:latest AS gosu
-FROM ${PULL_URL}:${DISTRO_VERSION} AS build
+FROM almalinux/10-init
 ARG TZ
 ARG PATH
 ARG USER
@@ -54,7 +53,7 @@ ARG PHP_VERSION
 ARG PHP_SERVER
 ARG SHELL_OPTS
 
-ARG PACK_LIST="bash bash-completion git curl wget sudo unzip tini iproute net-tools glibc-langpack-en pinentry nail postfix python3-pip certbot ca-certificates "
+ARG PACK_LIST="bash bash-completion git curl wget sudo unzip iproute net-tools glibc-langpack-en pinentry python3-pip ca-certificates systemd systemd-libs NetworkManager valkey valkey-compat-redis certbot python3-certbot-apache python3-certbot-nginx cronie mod_authnz_external "
 
 ENV ENV=~/.profile
 ENV SHELL="/bin/sh"
@@ -80,8 +79,6 @@ RUN set -e; \
 
 ENV SHELL="/bin/bash"
 SHELL [ "/bin/bash", "-c" ]
-
-COPY --from=gosu /usr/local/bin/gosu /usr/local/bin/gosu
 
 RUN echo "Initializing the system"; \
   $SHELL_OPTS; \
@@ -168,89 +165,22 @@ RUN echo "Deleting unneeded files"; \
   $SHELL_OPTS; \
   pkmgr clean; \
   rm -Rf "/config" "/data" || true; \
-  rm -rf /etc/systemd/system/*.wants/* || true; \
-  rm -rf /lib/systemd/system/systemd-update-utmp* || true; \
-  rm -rf /lib/systemd/system/anaconda.target.wants/* || true; \
-  rm -rf /lib/systemd/system/local-fs.target.wants/* || true; \
-  rm -rf /lib/systemd/system/multi-user.target.wants/* || true; \
-  rm -rf /lib/systemd/system/sockets.target.wants/*udev* || true; \
-  rm -rf /lib/systemd/system/sockets.target.wants/*initctl* || true; \
-  rm -Rf /usr/share/doc/* /var/tmp/* /var/cache/*/* /root/.cache/* /usr/share/info/* /tmp/* || true; \
-  if [ -d "/lib/systemd/system/sysinit.target.wants" ];then cd "/lib/systemd/system/sysinit.target.wants" && rm -f $(ls | grep -v systemd-tmpfiles-setup);fi; \
+  rm -Rf /usr/share/doc/* /usr/share/info/* /tmp/* || true; \
+  rm -Rf /var/cache/*/* /root/.cache/* || true; \
+  find /var/tmp -mindepth 1 -delete 2>/dev/null || true; \
   if [ -f "/root/docker/setup/07-cleanup.sh" ];then echo "Running the cleanup script";/root/docker/setup/07-cleanup.sh||{ echo "Failed to execute /root/docker/setup/07-cleanup.sh" >&2 && exit 10; };echo "Done running the cleanup script";fi; \
   echo ""
 
 RUN echo "Init done"
-FROM scratch
-ARG TZ
-ARG PATH
-ARG USER
-ARG TIMEZONE
-ARG LANGUAGE
-ARG IMAGE_NAME
-ARG BUILD_DATE
-ARG SERVICE_PORT
-ARG EXPOSE_PORTS
-ARG BUILD_VERSION
-ARG IMAGE_VERSION
-ARG WWW_ROOT_DIR
-ARG DEFAULT_FILE_DIR
-ARG DEFAULT_DATA_DIR
-ARG DEFAULT_CONF_DIR
-ARG DEFAULT_TEMPLATE_DIR
-ARG DISTRO_VERSION
-ARG NODE_VERSION
-ARG NODE_MANAGER
-ARG PHP_VERSION
-ARG PHP_SERVER
-ARG LICENSE="WTFPL"
-ARG ENV_PORTS="${EXPOSE_PORTS}"
 
-USER ${USER}
-WORKDIR /root
-
-LABEL maintainer="CasjaysDev <docker-admin@casjaysdev.pro>"
-LABEL org.opencontainers.image.vendor="CasjaysDev"
-LABEL org.opencontainers.image.authors="CasjaysDev"
-LABEL org.opencontainers.image.description="Containerized version of ${IMAGE_NAME}"
-LABEL org.opencontainers.image.title="${IMAGE_NAME}"
-LABEL org.opencontainers.image.base.name="${IMAGE_NAME}"
-LABEL org.opencontainers.image.authors="${LICENSE}"
-LABEL org.opencontainers.image.created="${BUILD_DATE}"
-LABEL org.opencontainers.image.version="${BUILD_VERSION}"
-LABEL org.opencontainers.image.schema-version="${BUILD_VERSION}"
-LABEL org.opencontainers.image.url="docker.io"
-LABEL org.opencontainers.image.source="docker.io"
-LABEL org.opencontainers.image.vcs-type="Git"
-LABEL org.opencontainers.image.revision="${BUILD_VERSION}"
-LABEL org.opencontainers.image.source="https://github.com/casjaysdevdocker/blueonyx"
-LABEL org.opencontainers.image.documentation="https://github.com/casjaysdevdocker/blueonyx"
-LABEL com.github.containers.toolbox="false"
-
-ENV ENV=~/.bashrc
-ENV USER="${USER}"
-ENV PATH="${PATH}"
-ENV TZ="${TIMEZONE}"
-ENV SHELL="/bin/bash"
-ENV TIMEZONE="${TZ}"
-ENV LANG="${LANGUAGE}"
-ENV TERM="xterm-256color"
-ENV PORT="${SERVICE_PORT}"
-ENV ENV_PORTS="${ENV_PORTS}"
-ENV CONTAINER_NAME="${IMAGE_NAME}"
-ENV HOSTNAME="casjaysdev-${IMAGE_NAME}"
-ENV PHP_SERVER="${PHP_SERVER}"
-ENV NODE_VERSION="${NODE_VERSION}"
-ENV NODE_MANAGER="${NODE_MANAGER}"
-ENV PHP_VERSION="${PHP_VERSION}"
-ENV DISTRO_VERSION="${IMAGE_VERSION}"
-ENV WWW_ROOT_DIR="${WWW_ROOT_DIR}"
-
-COPY --from=build /. /
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Final configuration (no separate stage for systemd containers)
 
 VOLUME [ "/config","/data" ]
 
 EXPOSE ${SERVICE_PORT} ${ENV_PORTS}
 
-ENTRYPOINT [ "tini","--","/usr/local/bin/entrypoint.sh" ]
-HEALTHCHECK --start-period=10m --interval=5m --timeout=15s CMD [ "/usr/local/bin/entrypoint.sh", "healthcheck" ]
+STOPSIGNAL SIGRTMIN+3
+
+# Use systemd as PID 1 for multi-service management
+CMD ["/sbin/init"]
