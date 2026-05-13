@@ -30,13 +30,8 @@ exitCode=0
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Main script
-sudo sed -i 's/^SELINUX=.*/SELINUX=permissive/g' /etc/selinux/config && sudo dnf -y update && reboot
-curl -q -LSsf http://devel.blueonyx.it/pub/5211R.rpm -o /tmp/blueonyx.rpm
-yum localinstall -y /tmp/blueonyx.rpm
-yum clean all
-yum update -y
-yum groupinstall -y blueonyx
-sh /usr/sausalito/scripts/initServices.sh && reboot
+# BlueOnyx installation is handled in 05-custom.sh
+# Nothing to do here - package installation via PACK_LIST already happened
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Set the exit code
 exitCode=$?

@@ -1,7 +1,7 @@
 # Docker image for blueonyx using the rhel template
 ARG IMAGE_NAME="blueonyx"
 ARG PHP_SERVER="blueonyx"
-ARG BUILD_DATE="202509161146"
+ARG BUILD_DATE="202605131434"
 ARG LANGUAGE="en_US.UTF-8"
 ARG TIMEZONE="America/New_York"
 ARG WWW_ROOT_DIR="/usr/local/share/httpd/default"

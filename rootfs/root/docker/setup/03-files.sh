@@ -81,12 +81,6 @@ fi
 unset data
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Main script
-case $(uname -m) in
-"x86_64") target="bin.linux.incus.x86_64" ;;
-"aarch64") target="bin.linux.incus.aarch64" ;;
-*) target="bin.linux.incus.x86_64" ;;
-esac
-curl -q -LSsf "https://github.com/lxc/incus/releases/latest/download/$target" -o /usr/local/bin/incus && chmod 755 "/usr/local/bin/incus"
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Set the exit code
 exitCode=$?
